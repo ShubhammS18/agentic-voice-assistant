@@ -4,13 +4,6 @@ from app.config import settings
 
 
 async def transcribe_stream(audio_queue: asyncio.Queue) -> tuple[str, int]:
-    '''
-    Consume raw audio bytes from audio_queue.
-    Returns (transcript: str, asr_ms: int) when utterance is complete.
-
-    audio_queue: asyncio.Queue feeding raw PCM bytes (16kHz, 16-bit, mono)
-    Returns: final transcript text and latency in milliseconds
-    '''
     client = DeepgramClient(settings.deepgram_api_key)
     transcript_parts: list[str] = []
     final_event = asyncio.Event()
@@ -19,8 +12,11 @@ async def transcribe_stream(audio_queue: asyncio.Queue) -> tuple[str, int]:
 
     connection = client.listen.asyncwebsocket.v('1')
 
-    async def on_transcript(result, **kwargs):
+    async def on_transcript(self, **kwargs):
         nonlocal t_final
+        result = kwargs.get('result')
+        if result is None:
+            return
         alt = result.channel.alternatives[0]
         if alt.transcript and result.is_final:
             transcript_parts.append(alt.transcript)
@@ -28,13 +24,12 @@ async def transcribe_stream(audio_queue: asyncio.Queue) -> tuple[str, int]:
             if result.speech_final:
                 final_event.set()
 
-    async def on_utterance_end(result, **kwargs):
-        # Fires after utterance_end_ms of silence — catches cases
-        # where speech_final never arrives
+    async def on_utterance_end(self, **kwargs):
         if transcript_parts:
             final_event.set()
 
-    async def on_error(error, **kwargs):
+    async def on_error(self, **kwargs):
+        error = kwargs.get('error')
         print(f'[Deepgram error] {error}')
         final_event.set()
 
@@ -49,8 +44,7 @@ async def transcribe_stream(audio_queue: asyncio.Queue) -> tuple[str, int]:
         channels=1,
         punctuate=True,
         interim_results=True,
-        utterance_end_ms=1000,
-        speech_final=True)
+        utterance_end_ms=1000)
 
     await connection.start(options)
 
@@ -68,13 +62,11 @@ async def transcribe_stream(audio_queue: asyncio.Queue) -> tuple[str, int]:
         await asyncio.wait_for(
             final_event.wait(),
             timeout=settings.asr_timeout_ms / 1000)
-        
     except asyncio.TimeoutError:
         raise TimeoutError(f'ASR timeout after {settings.asr_timeout_ms}ms')
     finally:
         send_task.cancel()
 
-    # Use t_start as fallback if t_final was never set
     if t_final == 0.0:
         t_final = time.perf_counter()
 

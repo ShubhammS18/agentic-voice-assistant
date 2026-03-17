@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Voice Assistant — Day 1 Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
+        button { padding: 12px 24px; font-size: 16px; cursor: pointer; margin: 8px; }
+        #status { margin: 16px 0; font-weight: bold; color: #444; }
+        #latency { background: #f0f0f0; padding: 16px; border-radius: 8px; margin-top: 16px; font-family: monospace; white-space: pre; }
+        #transcript { color: #1a3a6a; margin: 8px 0; }
+        #response { color: #1a6b3a; margin: 8px 0; }
+    </style>
+</head>
+<body>
+    <h1>Voice Assistant — Day 1 Checkpoint</h1>
+    <button id="startBtn" onclick="startRecording()">🎤 Start Speaking</button>
+    <button id="stopBtn" onclick="stopRecording()" disabled>⏹ Stop</button>
+    <div id="status">Ready</div>
+    <div id="transcript"></div>
+    <div id="response"></div>
+    <div id="latency"></div>
+
+    <script>
+        let ws, mediaRecorder, audioCtx, chunks = [];
+
+        function startRecording() {
+            ws = new WebSocket(`ws://${location.host}/ws/voice`);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                document.getElementById('status').textContent = 'Connected — speak now';
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'audio') {
+                    // Decode and play audio
+                    const bytes = Uint8Array.from(atob(msg.data), c => c.charCodeAt(0));
+                    playAudio(bytes.buffer);
+                } else if (msg.type === 'latency') {
+                    document.getElementById('transcript').textContent = 'You said: ' + msg.transcript;
+                    document.getElementById('response').textContent = 'Response: ' + msg.response_text;
+                    document.getElementById('latency').textContent =
+                        `asr_ms:      ${msg.asr_ms}\n` +
+                        `llm_ttft_ms: ${msg.llm_ttft_ms}\n` +
+                        `tts_ttfb_ms: ${msg.tts_ttfb_ms}\n` +
+                        `total_ms:    ${msg.total_ms}\n` +
+                        `within_budget: ${msg.within_budget}`;
+                    document.getElementById('status').textContent = 'Done — speak again or close';
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('stopBtn').disabled = true;
+                } else if (msg.type === 'error') {
+                    document.getElementById('status').textContent = 'Error: ' + msg.message;
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('stopBtn').disabled = true;
+                }
+            };
+
+            ws.onclose = () => {
+                document.getElementById('status').textContent = 'Disconnected';
+            };
+
+            // Start microphone
+            navigator.mediaDevices.getUserMedia({ audio: {
+                sampleRate: 16000, channelCount: 1, echoCancellation: true
+            }}).then(stream => {
+                audioCtx = new AudioContext({ sampleRate: 16000 });
+                const source = audioCtx.createMediaStreamSource(stream);
+                const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+                processor.onaudioprocess = (e) => {
+                    if (ws.readyState !== WebSocket.OPEN) return;
+                    const float32 = e.inputBuffer.getChannelData(0);
+                    // Convert to 16-bit PCM
+                    const int16 = new Int16Array(float32.length);
+                    for (let i = 0; i < float32.length; i++) {
+                        int16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
+                    }
+                    ws.send(int16.buffer);
+                };
+
+                source.connect(processor);
+                processor.connect(audioCtx.destination);
+
+                // Store processor/stream reference for cleanup
+                window._processor = processor;
+                window._stream = stream;
+            });
+        }
+
+        function stopRecording() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                // Send END sentinel as text
+                ws.send(new TextEncoder().encode('END'));
+                document.getElementById('status').textContent = 'Processing...';
+            }
+            if (window._processor) window._processor.disconnect();
+            if (window._stream) window._stream.getTracks().forEach(t => t.stop());
+            document.getElementById('stopBtn').disabled = true;
+        }
+
+        let audioQueue = [], isPlaying = false;
+        function playAudio(buffer) {
+            audioQueue.push(buffer);
+            if (!isPlaying) drainAudio();
+        }
+        function drainAudio() {
+            if (audioQueue.length === 0) { isPlaying = false; return; }
+            isPlaying = true;
+            const ctx = new AudioContext();
+            ctx.decodeAudioData(audioQueue.shift(), (decoded) => {
+                const source = ctx.createBufferSource();
+                source.buffer = decoded;
+                source.connect(ctx.destination);
+                source.onended = drainAudio;
+                source.start();
+            }, drainAudio);
+        }
+    </script>
+</body>
+</html>
