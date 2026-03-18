@@ -1,3 +1,4 @@
+# app/api.py
 import asyncio
 import uuid
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -19,51 +20,83 @@ def index():
 def health():
     return {"status": "ok", "model": settings.llm_model}
 
+# Session memory persists across WebSocket connections for the same session_id
+_sessions: dict[str, list[dict]] = {}
+
 @app.websocket("/ws/voice")
 async def voice_endpoint(websocket: WebSocket):
     await websocket.accept()
-    session_id = str(uuid.uuid4())
-    conversation_history = []
 
-    try:
-        audio_queue = asyncio.Queue()
-        audio_out_queue = asyncio.Queue()
+    # Browser sends session_id as query param to persist conversation history
+    session_id = websocket.query_params.get("session_id", str(uuid.uuid4()))
+    if session_id not in _sessions:
+        _sessions[session_id] = []
+    conversation_history = _sessions[session_id]
 
-        async def receive_audio():
-            while True:
+    audio_queue = asyncio.Queue()
+    audio_out_queue = asyncio.Queue()
+
+    async def receive_audio():
+        while True:
+            try:
                 message = await websocket.receive()
-                if message["type"] == "websocket.disconnect":
+            except Exception:
+                await audio_queue.put(None)
+                break
+            if message["type"] == "websocket.disconnect":
+                await audio_queue.put(None)
+                break
+            elif message["type"] == "websocket.receive":
+                if "bytes" in message and message["bytes"]:
+                    await audio_queue.put(message["bytes"])
+                elif "text" in message and message["text"] == "END":
                     await audio_queue.put(None)
                     break
-                elif message["type"] == "websocket.receive":
-                    if "bytes" in message and message["bytes"]:
-                        await audio_queue.put(message["bytes"])
-                    elif "text" in message and message["text"] == "END":
-                        await audio_queue.put(None)
-                        break
 
-        # Start receiving audio BEFORE calling run_turn
-        # so audio flows into the queue while ASR is processing
-        receive_task = asyncio.create_task(receive_audio())
+    receive_task = asyncio.create_task(receive_audio())
 
+    try:
+        report = await run_turn(
+            audio_queue=audio_queue,
+            audio_out_queue=audio_out_queue,
+            conversation_history=conversation_history,
+            turn_id=str(uuid.uuid4()),
+            session_id=session_id,
+        )
+
+        # Drain audio
+        while True:
+            chunk = await audio_out_queue.get()
+            if chunk is None:
+                break
+            await websocket.send_text(
+                '{"type":"audio","data":"' + chunk + '"}'
+            )
+
+        await websocket.send_json({
+            "type": "latency",
+            **report.breakdown()
+        })
+
+        if report.transcript:
+            conversation_history.append({
+                "role": "user",
+                "content": report.transcript
+            })
+            conversation_history.append({
+                "role": "assistant",
+                "content": report.response_text
+            })
+
+    except Exception as e:
+        print(f'[api] error: {e}')
         try:
-            report = await run_turn(
-                    audio_queue=audio_queue,
-                    audio_out_queue=audio_out_queue,
-                    conversation_history=conversation_history,
-                    turn_id=str(uuid.uuid4()),
-                    session_id=session_id)
-
-            await websocket.send_json({"type": "latency",**report.breakdown()})
-
-            conversation_history.append({"role": "user", "content": report.transcript})
-            conversation_history.append({"role": "assistant", "content": report.response_text})
-
-        except Exception as e:
-            print(f'[DEBUG] run_turn error: {e}')
             await websocket.send_json({"type": "error", "message": str(e)})
-        finally:
-            receive_task.cancel()
-
-    except WebSocketDisconnect:
-        pass
+        except Exception:
+            pass
+    finally:
+        receive_task.cancel()
+        try:
+            await receive_task
+        except asyncio.CancelledError:
+            pass

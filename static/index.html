@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Voice Assistant — Day 1 Test</title>
+    <title>Voice Assistant</title>
     <style>
         body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
         button { padding: 12px 24px; font-size: 16px; cursor: pointer; margin: 8px; }
@@ -9,46 +9,85 @@
         #latency { background: #f0f0f0; padding: 16px; border-radius: 8px; margin-top: 16px; font-family: monospace; white-space: pre; }
         #transcript { color: #1a3a6a; margin: 8px 0; }
         #response { color: #1a6b3a; margin: 8px 0; }
+        #history { margin-top: 16px; font-size: 14px; color: #666; }
     </style>
 </head>
 <body>
-    <h1>Voice Assistant — Day 1 Checkpoint</h1>
+    <h1>Agentic Voice Assistant</h1>
     <button id="startBtn" onclick="startRecording()">🎤 Start Speaking</button>
     <button id="stopBtn" onclick="stopRecording()" disabled>⏹ Stop</button>
     <div id="status">Ready</div>
     <div id="transcript"></div>
     <div id="response"></div>
     <div id="latency"></div>
+    <div id="history"></div>
 
     <script>
-        let ws, mediaRecorder, audioCtx, chunks = [];
+        // Generate once per page load — persists across turns
+        const SESSION_ID = crypto.randomUUID();
+        let turnCount = 0;
 
         function startRecording() {
-            ws = new WebSocket(`ws://${location.host}/ws/voice`);
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('status').textContent = 'Recording — speak now';
+
+            // New WebSocket per turn, same session_id
+            const ws = new WebSocket(`ws://${location.host}/ws/voice?session_id=${SESSION_ID}`);
             ws.binaryType = 'arraybuffer';
+            window._ws = ws;
 
             ws.onopen = () => {
-                document.getElementById('status').textContent = 'Connected — speak now';
-                document.getElementById('startBtn').disabled = true;
-                document.getElementById('stopBtn').disabled = false;
+                // Start microphone immediately
+                navigator.mediaDevices.getUserMedia({ audio: {
+                    sampleRate: 16000, channelCount: 1, echoCancellation: true
+                }}).then(stream => {
+                    const audioCtx = new AudioContext({ sampleRate: 16000 });
+                    const source = audioCtx.createMediaStreamSource(stream);
+                    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+                    processor.onaudioprocess = (e) => {
+                        if (ws.readyState !== WebSocket.OPEN) return;
+                        const float32 = e.inputBuffer.getChannelData(0);
+                        const int16 = new Int16Array(float32.length);
+                        for (let i = 0; i < float32.length; i++) {
+                            int16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
+                        }
+                        ws.send(int16.buffer);
+                    };
+                    source.connect(processor);
+                    processor.connect(audioCtx.destination);
+                    window._processor = processor;
+                    window._stream = stream;
+                });
             };
 
             ws.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'audio') {
-                    // Decode and play audio
                     const bytes = Uint8Array.from(atob(msg.data), c => c.charCodeAt(0));
                     playAudio(bytes.buffer);
                 } else if (msg.type === 'latency') {
-                    document.getElementById('transcript').textContent = 'You said: ' + msg.transcript;
-                    document.getElementById('response').textContent = 'Response: ' + msg.response_text;
+                    turnCount++;
+                    document.getElementById('transcript').textContent =
+                        `Turn ${turnCount} — You said: ${msg.transcript}`;
+                    document.getElementById('response').textContent =
+                        `Response: ${msg.response_text}`;
                     document.getElementById('latency').textContent =
-                        `asr_ms:      ${msg.asr_ms}\n` +
-                        `llm_ttft_ms: ${msg.llm_ttft_ms}\n` +
-                        `tts_ttfb_ms: ${msg.tts_ttfb_ms}\n` +
-                        `total_ms:    ${msg.total_ms}\n` +
+                        `asr_ms:        ${msg.asr_ms}\n` +
+                        `rewrite_ms:    ${msg.rewrite_ms}\n` +
+                        `route_ms:      ${msg.route_ms}\n` +
+                        `llm_ttft_ms:   ${msg.llm_ttft_ms}\n` +
+                        `tts_ttfb_ms:   ${msg.tts_ttfb_ms}\n` +
+                        `total_ms:      ${msg.total_ms}\n` +
+                        `agent_used:    ${msg.agent_used}\n` +
                         `within_budget: ${msg.within_budget}`;
-                    document.getElementById('status').textContent = 'Done — speak again or close';
+
+                    // Add to history
+                    const h = document.getElementById('history');
+                    h.innerHTML += `<p><b>Turn ${turnCount}:</b> ${msg.transcript}<br><i>${msg.response_text}</i></p>`;
+
+                    document.getElementById('status').textContent =
+                        `Turn ${turnCount} complete — click Start Speaking for next turn`;
                     document.getElementById('startBtn').disabled = false;
                     document.getElementById('stopBtn').disabled = true;
                 } else if (msg.type === 'error') {
@@ -59,41 +98,18 @@
             };
 
             ws.onclose = () => {
-                document.getElementById('status').textContent = 'Disconnected';
+                if (document.getElementById('stopBtn').disabled === false) {
+                    document.getElementById('status').textContent =
+                        'Connection closed — click Start Speaking to continue';
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('stopBtn').disabled = true;
+                }
             };
-
-            // Start microphone
-            navigator.mediaDevices.getUserMedia({ audio: {
-                sampleRate: 16000, channelCount: 1, echoCancellation: true
-            }}).then(stream => {
-                audioCtx = new AudioContext({ sampleRate: 16000 });
-                const source = audioCtx.createMediaStreamSource(stream);
-                const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-
-                processor.onaudioprocess = (e) => {
-                    if (ws.readyState !== WebSocket.OPEN) return;
-                    const float32 = e.inputBuffer.getChannelData(0);
-                    // Convert to 16-bit PCM
-                    const int16 = new Int16Array(float32.length);
-                    for (let i = 0; i < float32.length; i++) {
-                        int16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
-                    }
-                    ws.send(int16.buffer);
-                };
-
-                source.connect(processor);
-                processor.connect(audioCtx.destination);
-
-                // Store processor/stream reference for cleanup
-                window._processor = processor;
-                window._stream = stream;
-            });
         }
 
         function stopRecording() {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                // Send END sentinel as text
-                ws.send(new TextEncoder().encode('END'));
+            if (window._ws && window._ws.readyState === WebSocket.OPEN) {
+                window._ws.send(new TextEncoder().encode('END'));
                 document.getElementById('status').textContent = 'Processing...';
             }
             if (window._processor) window._processor.disconnect();
