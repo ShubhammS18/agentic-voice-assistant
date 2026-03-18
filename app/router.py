@@ -1,4 +1,3 @@
-# app/router.py
 import time
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -7,9 +6,9 @@ MODEL = SentenceTransformer('all-MiniLM-L6-v2')
 
 DOMAIN_DESCRIPTIONS = {
     'rag': (
-        'company documents, policies, technical guides, internal knowledge base, '
-        'product documentation, procedures, rules, historical records, '
-        'anything stored in the document archive'),
+        'questions about documents, policies, laws, regulations, visa rules, '
+        'immigration policy, company procedures, technical guides, '
+        'knowledge base content, internal documentation, how-to guides'),
     'web': (
         'current events, recent news, live prices, weather, today, '
         'latest updates, real-time information, things happening now, '

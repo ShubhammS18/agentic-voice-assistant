@@ -1,5 +1,5 @@
 import asyncio
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp import types
@@ -22,10 +22,15 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         raise ValueError(f'Unknown tool: {name}')
     def _search():
         with DDGS() as ddgs:
-            return list(ddgs.text(arguments['query'], max_results=3))
+            results = list(ddgs.text(arguments['query'], max_results=3))
+            print(f'[DEBUG] DDG raw results count: {len(results)}', flush=True)
+            print(f'[DEBUG] DDG first result: {results[0] if results else "EMPTY"}', flush=True)
+            return results
     results = await asyncio.to_thread(_search)
     snippets = [f"{r['title']}: {r['body'][:200]}" for r in results]
-    return [types.TextContent(type='text', text=' '.join(snippets))]
+    combined = ' '.join(snippets)
+    print(f'[DEBUG] combined length: {len(combined)}', flush=True)
+    return [types.TextContent(type='text', text=combined)]
 
 async def main():
     async with stdio_server() as (read, write):

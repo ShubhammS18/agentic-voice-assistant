@@ -1,4 +1,5 @@
 import time
+import asyncio
 from anthropic import AsyncAnthropic
 from app.config import settings
 from agent.state import AgentState
@@ -19,66 +20,53 @@ async def orchestrator_node(state: AgentState) -> AgentState:
 
 
 async def call_rag_node(state: AgentState) -> AgentState:
-    """Call the RAG MCP server."""
+    """Call the RAG tool directly."""
+    import httpx
     t_start = time.perf_counter()
-    from mcp import ClientSession
-    from mcp.client.stdio import stdio_client
-    import subprocess, sys
-    proc = subprocess.Popen(
-        [sys.executable, 'mcp_servers/rag_server.py'],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    async with stdio_client(proc.stdin, proc.stdout) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(
-                'ask_documents', {'query': state['transcript']})
-            tool_result = result.content[0].text
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            response = await http_client.post(
+                'http://localhost:8000/ask',
+                json={'question': state['transcript']})
+            data = response.json()
+            tool_result = f"{data['answer']} (verdict: {data['verdict']})"
+    except Exception as e:
+        tool_result = f"RAG unavailable: {e}"
     tool_latency_ms = int((time.perf_counter() - t_start) * 1000)
     return {**state, 'tool_result': tool_result, 'tool_latency_ms': tool_latency_ms}
 
 
 async def call_web_node(state: AgentState) -> AgentState:
-    """Call the web search MCP server (DuckDuckGo)."""
+    """Call DuckDuckGo directly."""
+    from ddgs import DDGS
     t_start = time.perf_counter()
-    from mcp import ClientSession
-    from mcp.client.stdio import stdio_client
-    import subprocess, sys
-    proc = subprocess.Popen(
-        [sys.executable, 'mcp_servers/websearch_server.py'],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    async with stdio_client(proc.stdin, proc.stdout) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(
-                'search_web', {'query': state['transcript']})
-            tool_result = result.content[0].text
+    query = state['sub_queries'][0] if state.get('sub_queries') else state['transcript']
+    try:
+        def _search():
+            with DDGS() as ddgs:
+                return list(ddgs.text(query, max_results=3))
+        results = await asyncio.to_thread(_search)
+        snippets = [f"{r['title']}: {r['body'][:200]}" for r in results]
+        tool_result = ' '.join(snippets)
+    except Exception as e:
+        tool_result = f"Web search unavailable: {e}"
+        print(f'web search error: {e}')
     tool_latency_ms = int((time.perf_counter() - t_start) * 1000)
     return {**state, 'tool_result': tool_result, 'tool_latency_ms': tool_latency_ms}
 
 
 async def call_data_node(state: AgentState) -> AgentState:
-    """Call the structured data MCP server."""
+    """Look up structured data directly."""
+    from mcp_servers.data_server import DATA_STORE
     t_start = time.perf_counter()
-    from mcp import ClientSession
-    from mcp.client.stdio import stdio_client
-    import subprocess, sys
-    proc = subprocess.Popen(
-        [sys.executable, 'mcp_servers/data_server.py'],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    
-    async with stdio_client(proc.stdin, proc.stdout) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            # Find best matching key from transcript
-            query = state['transcript'].lower()
-            key = 'tech_stack'  # default
-            for k in ['latency_budget', 'supported_languages',
-                    'routing_method', 'web_search_provider']:
-                if k.replace('_', ' ') in query:
-                    key = k
-                    break
-            result = await session.call_tool('lookup_structured', {'key': key})
-            tool_result = result.content[0].text
+    query = state['transcript'].lower()
+    key = 'tech_stack'
+    for k in ['latency_budget', 'supported_languages',
+            'routing_method', 'web_search_provider']:
+        if k.replace('_', ' ') in query:
+            key = k
+            break
+    tool_result = DATA_STORE.get(key, f'No data found for key: {key}')
     tool_latency_ms = int((time.perf_counter() - t_start) * 1000)
     return {**state, 'tool_result': tool_result, 'tool_latency_ms': tool_latency_ms}
 
