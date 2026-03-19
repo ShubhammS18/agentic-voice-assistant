@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str
     deepgram_api_key: str
     elevenlabs_api_key: str
-    elevenlabs_voice_id: str = '21m00Tcm4TlvDq8ikWAM'
+    elevenlabs_voice_id: str = 'Xb7hH8MSUJpSbSDYk0k2'
     tavily_api_key: str
     langchain_api_key: str = ''
     langchain_tracing_v2: str = 'false'

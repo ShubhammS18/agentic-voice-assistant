@@ -100,9 +100,9 @@ async def run_turn(
     tts_text_queue = asyncio.Queue()
 
     async def forward_tokens():
-        for token in response_text.split():
-            await tts_text_queue.put(token + ' ')
-    await tts_text_queue.put(None)
+        if response_text:
+            await tts_text_queue.put(response_text)
+        await tts_text_queue.put(None)
 
     forward_task = asyncio.create_task(forward_tokens())
     try:

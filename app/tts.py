@@ -57,9 +57,9 @@ async def stream_tts(text_queue: asyncio.Queue, audio_out_queue: asyncio.Queue) 
             if isinstance(item, tuple):
                 continue
             text_buffer += item
-            if any(text_buffer.endswith(p) for p in [". ", "? ", "! ", ", "]):
-                await ws.send(json.dumps({"text": text_buffer}))
-                text_buffer = ""
+            if len(text_buffer) >= 100 or any(text_buffer.endswith(p) for p in ['. ', '? ', '! ', ', ']):
+                await ws.send(json.dumps({'text': text_buffer}))
+            text_buffer = ''
         await receive_task
 
 
