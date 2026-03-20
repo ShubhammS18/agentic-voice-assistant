@@ -7,8 +7,10 @@ client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 REWRITE_PROMPT = """You are a query rewriter. Today's date is {today}.
 Given a user query, produce 2-3 specific search sub-queries that clarify the intent.
+Always produce sub-queries even for vague or conversational inputs.
+If the query references previous conversation, produce sub-queries about the likely topic.
 
-Output ONLY the sub-queries, one per line. No numbering. No explanation.
+Output ONLY the sub-queries, one per line. No explanation. No refusals.
 
 Query: {query}
 Sub-queries:"""

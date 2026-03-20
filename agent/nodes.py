@@ -83,7 +83,7 @@ async def synthesize_node(state: AgentState) -> AgentState:
         f"User asked: {state['transcript']}\n"
         + (f"Relevant past context: {memory}\n" if memory else '')
         + (f"Information from {state['route']} tool: {context}\n" if context else '')
-        + "Respond in 2-3 natural spoken sentences. No markdown. No lists.")
+        + "Respond in 2-3 natural spoken sentences. No markdown. No lists. Only use the information provided. Do not add anything from your own knowledge.")
 
     full_response = ''
     llm_ttft_ms = 0

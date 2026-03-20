@@ -1,44 +1,237 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Voice Assistant</title>
+    <title>Agentic Voice Assistant</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
-        button { padding: 12px 24px; font-size: 16px; cursor: pointer; margin: 8px; }
-        #status { margin: 16px 0; font-weight: bold; color: #444; }
-        #latency { background: #f0f0f0; padding: 16px; border-radius: 8px; margin-top: 16px; font-family: monospace; white-space: pre; }
-        #transcript { color: #1a3a6a; margin: 8px 0; }
-        #response { color: #1a6b3a; margin: 8px 0; }
-        #history { margin-top: 16px; font-size: 14px; color: #666; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; background: #0f172a; color: #e2e8f0; padding: 24px; }
+        h1 { font-size: 1.5rem; color: #38bdf8; margin-bottom: 24px; }
+
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 900px; }
+
+        .card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #334155;
+        }
+        .card h2 { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase;
+                letter-spacing: 0.05em; margin-bottom: 16px; }
+
+        /* Controls */
+        .controls { display: flex; gap: 12px; margin-bottom: 16px; }
+        button {
+            padding: 10px 20px; border-radius: 8px; border: none;
+            font-size: 0.95rem; cursor: pointer; font-weight: 600}
+        #startBtn { background: #38bdf8; color: #0f172a; }
+        #startBtn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+        #stopBtn { background: #f87171; color: #0f172a; }
+        #stopBtn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+
+        #status { font-size: 0.9rem; color: #94a3b8; margin-top: 8px; }
+
+        /* Transcript and response */
+        #transcript { color: #38bdf8; font-size: 0.95rem; margin-bottom: 8px; min-height: 20px; }
+        #response { color: #86efac; font-size: 0.95rem; line-height: 1.5; min-height: 40px; }
+
+        /* Latency bars */
+        .metric { margin-bottom: 12px; }
+        .metric-label { display: flex; justify-content: space-between;
+                        font-size: 0.8rem; color: #94a3b8; margin-bottom: 4px; }
+        .metric-label span:last-child { color: #e2e8f0; font-weight: 600; }
+        .bar-track { background: #0f172a; border-radius: 4px; height: 8px; overflow: hidden; }
+        .bar { height: 100%; border-radius: 4px; transition: width 0.4s ease; width: 0%; }
+
+        /* Routing */
+        #current-agent { font-size: 1.3rem; font-weight: bold; color: #38bdf8; margin-bottom: 4px; }
+        #route-ms { font-size: 0.8rem; color: #94a3b8; margin-bottom: 12px; }
+
+        /* History */
+        .history-entry { border-top: 1px solid #334155; padding-top: 10px; margin-top: 10px; }
+        .history-entry .turn-label { font-size: 0.75rem; color: #64748b; margin-bottom: 4px; }
+        .history-entry .turn-q { color: #38bdf8; font-size: 0.85rem; }
+        .history-entry .turn-a { color: #86efac; font-size: 0.85rem; margin-top: 2px; }
+
+        /* Budget indicator */
+        #budget { font-size: 0.85rem; margin-top: 8px; }
+        .budget-ok  { color: #86efac; }
+        .budget-fail { color: #f87171; }
     </style>
 </head>
 <body>
-    <h1>Agentic Voice Assistant</h1>
-    <button id="startBtn" onclick="startRecording()">🎤 Start Speaking</button>
-    <button id="stopBtn" onclick="stopRecording()" disabled>⏹ Stop</button>
-    <div id="status">Ready</div>
-    <div id="transcript"></div>
-    <div id="response"></div>
-    <div id="latency"></div>
-    <div id="history"></div>
+    <h1>⚡ Agentic Voice Assistant</h1>
+
+    <div class="grid">
+        <!-- Left column -->
+        <div>
+            <!-- Controls card -->
+            <div class="card" style="margin-bottom:16px">
+                <h2>Controls</h2>
+                <div class="controls">
+                    <button id="startBtn" onclick="startRecording()">🎤 Start Speaking</button>
+                    <button id="stopBtn" onclick="stopRecording()" disabled>⏹ Stop</button>
+                </div>
+                <div id="status">Ready</div>
+            </div>
+
+            <!-- Conversation card -->
+            <div class="card" style="margin-bottom:16px">
+                <h2>Conversation</h2>
+                <div id="transcript">—</div>
+                <div id="response">—</div>
+                <div id="budget"></div>
+            </div>
+
+            <!-- History card -->
+            <div class="card">
+                <h2>Turn History</h2>
+                <div id="history"></div>
+            </div>
+        </div>
+
+        <!-- Right column -->
+        <div>
+            <!-- Latency card -->
+            <div class="card" style="margin-bottom:16px">
+                <h2>Latency Breakdown</h2>
+
+                <div class="metric">
+                    <div class="metric-label">
+                        <span>🎤 ASR</span>
+                        <span id="asr-ms">—</span>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar" id="bar-asr" style="background:#38bdf8"></div>
+                    </div>
+                </div>
+
+                <div class="metric">
+                    <div class="metric-label">
+                        <span>✏️ Rewrite</span>
+                        <span id="rewrite-ms">—</span>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar" id="bar-rewrite" style="background:#a78bfa"></div>
+                    </div>
+                </div>
+
+                <div class="metric">
+                    <div class="metric-label">
+                        <span>🔀 Route</span>
+                        <span id="route-ms">—</span>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar" id="bar-route" style="background:#fb923c"></div>
+                    </div>
+                </div>
+
+                <div class="metric">
+                    <div class="metric-label">
+                        <span>🧠 LLM TTFT</span>
+                        <span id="llm-ms">—</span>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar" id="bar-llm" style="background:#34d399"></div>
+                    </div>
+                </div>
+
+                <div class="metric">
+                    <div class="metric-label">
+                        <span>🔊 TTS TTFB</span>
+                        <span id="tts-ms">—</span>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar" id="bar-tts" style="background:#f472b6"></div>
+                    </div>
+                </div>
+
+                <div style="border-top:1px solid #334155; margin-top:12px; padding-top:12px;">
+                    <div class="metric-label">
+                        <span>⏱ Total</span>
+                        <span id="total-ms" style="color:#e2e8f0; font-weight:bold">—</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Routing card -->
+            <div class="card">
+                <h2>Agent Routing</h2>
+                <div id="current-agent">—</div>
+                <div id="route-ms-display"></div>
+                <div id="routing-history"></div>
+            </div>
+        </div>
+    </div>
 
     <script>
-        // Generate once per page load — persists across turns
         const SESSION_ID = crypto.randomUUID();
         let turnCount = 0;
+
+        const AGENT_LABELS = {
+            rag:    '📄 RAG — Document search',
+            web:    '🌐 Web — DuckDuckGo search',
+            data:   '🗄️ Data — Structured lookup',
+            direct: '💬 Direct — No tool needed',
+        };
+
+        function updateLatency(r) {
+            const vals = [r.asr_ms, r.rewrite_ms, r.route_ms, r.llm_ttft_ms, r.tts_ttfb_ms];
+            const max = Math.max(...vals, 1);
+
+            const set = (id, barId, val) => {
+                document.getElementById(id).textContent = val + ' ms';
+                document.getElementById(barId).style.width = (val / max * 100) + '%';
+            };
+
+            set('asr-ms',    'bar-asr',    r.asr_ms);
+            set('rewrite-ms','bar-rewrite', r.rewrite_ms);
+            set('route-ms',  'bar-route',  r.route_ms);
+            set('llm-ms',    'bar-llm',    r.llm_ttft_ms);
+            set('tts-ms',    'bar-tts',    r.tts_ttfb_ms);
+            document.getElementById('total-ms').textContent = r.total_ms + ' ms';
+
+            const budget = document.getElementById('budget');
+            budget.textContent = r.within_budget
+                ? '✅ Within latency budget'
+                : `⚠️ Over budget (limit: ${r.total_ms > 1800 ? '1800ms' : ''})`;
+            budget.className = r.within_budget ? 'budget-ok' : 'budget-fail';
+        }
+
+        function updateRouting(r) {
+            document.getElementById('current-agent').textContent =
+                AGENT_LABELS[r.agent_used] || r.agent_used;
+            document.getElementById('route-ms-display').textContent =
+                `Routing decision: ${r.route_ms}ms`;
+
+            const h = document.getElementById('routing-history');
+            const entry = document.createElement('div');
+            entry.style.cssText = 'font-size:0.8rem; color:#64748b; margin-top:6px;';
+            entry.textContent = `Turn ${turnCount}: ${AGENT_LABELS[r.agent_used] || r.agent_used}`;
+            h.prepend(entry);
+        }
+
+        function addHistory(r) {
+            const h = document.getElementById('history');
+            const entry = document.createElement('div');
+            entry.className = 'history-entry';
+            entry.innerHTML = `
+                <div class="turn-label">Turn ${turnCount}</div>
+                <div class="turn-q">Q: ${r.transcript}</div>
+                <div class="turn-a">A: ${r.response_text}</div>
+            `;
+            h.prepend(entry);
+        }
 
         function startRecording() {
             document.getElementById('startBtn').disabled = true;
             document.getElementById('stopBtn').disabled = false;
             document.getElementById('status').textContent = 'Recording — speak now';
 
-            // New WebSocket per turn, same session_id
             const ws = new WebSocket(`ws://${location.host}/ws/voice?session_id=${SESSION_ID}`);
             ws.binaryType = 'arraybuffer';
             window._ws = ws;
 
             ws.onopen = () => {
-                // Start microphone immediately
                 navigator.mediaDevices.getUserMedia({ audio: {
                     sampleRate: 16000, channelCount: 1, echoCancellation: true
                 }}).then(stream => {
@@ -68,24 +261,11 @@
                     playAudio(bytes.buffer);
                 } else if (msg.type === 'latency') {
                     turnCount++;
-                    document.getElementById('transcript').textContent =
-                        `Turn ${turnCount} — You said: ${msg.transcript}`;
-                    document.getElementById('response').textContent =
-                        `Response: ${msg.response_text}`;
-                    document.getElementById('latency').textContent =
-                        `asr_ms:        ${msg.asr_ms}\n` +
-                        `rewrite_ms:    ${msg.rewrite_ms}\n` +
-                        `route_ms:      ${msg.route_ms}\n` +
-                        `llm_ttft_ms:   ${msg.llm_ttft_ms}\n` +
-                        `tts_ttfb_ms:   ${msg.tts_ttfb_ms}\n` +
-                        `total_ms:      ${msg.total_ms}\n` +
-                        `agent_used:    ${msg.agent_used}\n` +
-                        `within_budget: ${msg.within_budget}`;
-
-                    // Add to history
-                    const h = document.getElementById('history');
-                    h.innerHTML += `<p><b>Turn ${turnCount}:</b> ${msg.transcript}<br><i>${msg.response_text}</i></p>`;
-
+                    document.getElementById('transcript').textContent = 'You: ' + msg.transcript;
+                    document.getElementById('response').textContent = msg.response_text;
+                    updateLatency(msg);
+                    updateRouting(msg);
+                    addHistory(msg);
                     document.getElementById('status').textContent =
                         `Turn ${turnCount} complete — click Start Speaking for next turn`;
                     document.getElementById('startBtn').disabled = false;
@@ -98,9 +278,8 @@
             };
 
             ws.onclose = () => {
-                if (document.getElementById('stopBtn').disabled === false) {
-                    document.getElementById('status').textContent =
-                        'Connection closed — click Start Speaking to continue';
+                if (!document.getElementById('stopBtn').disabled) {
+                    document.getElementById('status').textContent = 'Disconnected';
                     document.getElementById('startBtn').disabled = false;
                     document.getElementById('stopBtn').disabled = true;
                 }
@@ -126,7 +305,7 @@
             if (audioQueue.length === 0) { isPlaying = false; return; }
             isPlaying = true;
             const ctx = new AudioContext();
-            ctx.decodeAudioData(audioQueue.shift(), (decoded) => {
+            ctx.decodeAudioData(audioQueue.shift(), decoded => {
                 const source = ctx.createBufferSource();
                 source.buffer = decoded;
                 source.connect(ctx.destination);
