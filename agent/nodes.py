@@ -24,7 +24,7 @@ async def call_rag_node(state: AgentState) -> AgentState:
     import httpx
     t_start = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=10.0) as http_client:
+        async with httpx.AsyncClient(timeout=60.0) as http_client:
             response = await http_client.post(
                 'http://localhost:8000/ask',
                 json={'question': state['transcript']})

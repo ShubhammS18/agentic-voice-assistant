@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
 
     asr_timeout_ms: int = 5000
-    agent_timeout_ms: int = 4000
+    agent_timeout_ms: int = 50000
     llm_timeout_ms: int = 8000
     tts_timeout_ms: int = 3000
     total_latency_budget_ms: int = 1800
