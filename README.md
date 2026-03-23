@@ -5,6 +5,16 @@
 
 > A voice-controlled assistant that listens to what you say, figures out the best way to answer it, and speaks back — routing your query through RAG, live web search, or a structured data store depending on what you asked. Built with semantic routing (no LLM needed for routing decisions), three independent MCP servers, and two-layer agent memory that actually remembers what you said earlier in the conversation.
 
+Enterprise support desks, internal knowledge bases, and customer-facing
+voice agents all share the same problem: a single LLM call can't
+reliably answer every query type — knowledge questions need grounded
+retrieval, current events need live web access, and structured lookups
+need deterministic data. This assistant solves that by routing each
+spoken query to the right tool automatically, with sub-1800ms
+end-to-end latency. **The target use case is any team that needs a voice
+interface over mixed data sources without building separate systems for
+each one.**
+
 ---
 
 ## What it looks like
